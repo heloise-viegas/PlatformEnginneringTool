@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reference-service
+  namespace: reference-service
+  labels:
+    app: reference-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: reference-service
+  template:
+    metadata:
+      labels:
+        app: reference-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: reference-service
+          # TODO: swap for your ECR/registry image once Week 3's CI pipeline
+          # is building and pushing it. Never use `:latest` (Week 4 policy).
+          image: <your-registry>/reference-service:0.1.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SERVICE_NAME
+              value: reference-service
+            - name: SERVICE_VERSION
+              value: "0.1.0"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20

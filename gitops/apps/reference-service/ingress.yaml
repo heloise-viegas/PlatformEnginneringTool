@@ -1,0 +1,9 @@
+# Skipped for now - ingress-nginx is off (terraform module platform-addons,
+# enable_ingress_nginx = false) to avoid the AWS LoadBalancer cost its Service
+# incurs. Access the service instead with:
+#
+#   kubectl port-forward svc/reference-service 8080:80 -n reference-service
+#   curl http://localhost:8080/
+#
+# To re-enable: set enable_ingress_nginx = true in terraform.tfvars, apply,
+# then restore an Ingress resource here pointing ingressClassName at "nginx".

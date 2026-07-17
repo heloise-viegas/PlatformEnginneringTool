@@ -1,0 +1,27 @@
+# TODO: replace repoURL with this repo's actual git remote once it's pushed.
+# Apply once with `kubectl apply -f` to bootstrap Argo CD, then Argo CD
+# manages itself via GitOps (any change to gitops/apps/reference-service
+# synced automatically).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: reference-service
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/<your-org>/<your-repo>.git
+    targetRevision: main
+    path: gitops/apps/reference-service
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: reference-service
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
