@@ -28,3 +28,6 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # Handles cases like Deployment.spec.selector changes (immutable field)
+      # by deleting and recreating the resource instead of failing the sync.
+      - Replace=true
