@@ -76,6 +76,12 @@ variable "node_max_size" {
   default     = 4
 }
 
+variable "node_disk_size" {
+  description = "Root EBS volume size (GB) for each worker node"
+  type        = number
+  default     = 30
+}
+
 variable "tags" {
   description = "Common tags applied to all resources"
   type        = map(string)

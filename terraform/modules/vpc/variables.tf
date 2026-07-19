@@ -1,42 +1,35 @@
-variable "name" {
-  description = "Name prefix used to tag VPC resources"
-  type        = string
+variable "project_name" {
+  type = string
+}
+
+variable "environment" {
+  type = string
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block for the VPC"
-  type        = string
-  default     = "10.0.0.0/16"
+  type = string
 }
 
-variable "azs" {
-  description = "Availability zones to spread subnets across"
-  type        = list(string)
+# Map of AZ → CIDR, e.g. { "ap-south-1a" = "10.0.1.0/24", "ap-south-1b" = "10.0.2.0/24" }
+variable "pub_subnets" {
+  description = "Map of AZ to CIDR block for public subnets"
+  type        = map(string)
+  default = {
+    "ap-south-1a" = "10.0.1.0/24"
+    "ap-south-1b" = "10.0.2.0/24"
+  }
 }
 
-variable "public_subnet_cidrs" {
-  description = "CIDR blocks for public subnets (one per AZ, same order as azs)"
-  type        = list(string)
-}
-
-variable "private_subnet_cidrs" {
-  description = "CIDR blocks for private subnets (one per AZ, same order as azs)"
-  type        = list(string)
-}
-
-variable "single_nat_gateway" {
-  description = "Use a single shared NAT gateway instead of one per AZ (cheaper, less resilient)"
-  type        = bool
-  default     = true
+variable "priv_subnets" {
+  description = "Map of AZ to CIDR block for private subnets"
+  type        = map(string)
+  default = {
+    "ap-south-1a" = "10.0.10.0/24"
+    "ap-south-1b" = "10.0.20.0/24"
+  }
 }
 
 variable "cluster_name" {
-  description = "EKS cluster name, used for the required kubernetes.io/cluster/<name> subnet tags"
+  description = "EKS cluster name — used for required subnet tags"
   type        = string
-}
-
-variable "tags" {
-  description = "Extra tags applied to all resources"
-  type        = map(string)
-  default     = {}
 }

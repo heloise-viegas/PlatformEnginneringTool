@@ -1,109 +1,124 @@
-locals {
-  az_count = length(var.azs)
-
-  common_tags = merge(
-    var.tags,
-    {
-      "Name"                                        = var.name
-      "Environment"                                 = var.name
-      "kubernetes.io/cluster/${var.cluster_name}"   = "shared"
-    }
-  )
-}
-
-resource "aws_vpc" "this" {
+# ─── VPC ──────────────────────────────────────────────────────────────────────
+resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
-  enable_dns_hostnames = true
+  enable_dns_hostnames = true # Required for EKS node registration
 
-  tags = merge(local.common_tags, { "Name" = "${var.name}-vpc" })
+  tags = {
+    Name = "${var.project_name}-${var.environment}-vpc"
+  }
 }
 
-resource "aws_internet_gateway" "this" {
-  vpc_id = aws_vpc.this.id
+# ─── Internet Gateway ──────────────────────────────────────────────────────────
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
 
-  tags = merge(local.common_tags, { "Name" = "${var.name}-igw" })
+  tags = {
+    Name = "${var.project_name}-${var.environment}-igw"
+  }
 }
 
-# --- Public subnets ---------------------------------------------------------
-
+# ─── Public Subnets ───────────────────────────────────────────────────────────
+# Keyed by AZ (each.key = "ap-south-1a", each.value = "10.0.1.0/24")
 resource "aws_subnet" "public" {
-  count                   = local.az_count
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.public_subnet_cidrs[count.index]
-  availability_zone       = var.azs[count.index]
+  for_each = var.pub_subnets
+
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = each.value
+  availability_zone       = each.key
   map_public_ip_on_launch = true
 
-  tags = merge(local.common_tags, {
-    "Name"                                     = "${var.name}-public-${var.azs[count.index]}"
-    "kubernetes.io/role/elb"                   = "1"
-  })
+  tags = {
+    Name                                        = "${var.project_name}-${var.environment}-public-${each.key}"
+    "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+  }
 }
 
+# ─── Private Subnets ──────────────────────────────────────────────────────────
+resource "aws_subnet" "private" {
+  for_each = var.priv_subnets
+
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = each.value
+  availability_zone = each.key
+
+  tags = {
+    Name                                        = "${var.project_name}-${var.environment}-private-${each.key}"
+    "kubernetes.io/role/internal-elb"           = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+  }
+}
+
+# ─── Elastic IPs for NAT Gateways ─────────────────────────────────────────────
+# One EIP per public subnet (keyed by AZ)
+resource "aws_eip" "nat" {
+  for_each = var.pub_subnets
+  domain   = "vpc"
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-nat-eip-${each.key}"
+  }
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+# ─── NAT Gateways (one per AZ for HA) ────────────────────────────────────────
+resource "aws_nat_gateway" "main" {
+  for_each = var.pub_subnets
+
+  allocation_id = aws_eip.nat[each.key].id
+  subnet_id     = aws_subnet.public[each.key].id # NAT GW lives in PUBLIC subnet
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-nat-gw-${each.key}"
+  }
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+# ─── Public Route Table ───────────────────────────────────────────────────────
+# Single table shared by all public subnets — all go out via IGW
 resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.this.id
+  vpc_id = aws_vpc.main.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.this.id
+    gateway_id = aws_internet_gateway.main.id
   }
 
-  tags = merge(local.common_tags, { "Name" = "${var.name}-public-rt" })
+  tags = {
+    Name = "${var.project_name}-${var.environment}-public-rt"
+  }
 }
 
 resource "aws_route_table_association" "public" {
-  count          = local.az_count
-  subnet_id      = aws_subnet.public[count.index].id
+  for_each = var.pub_subnets
+
+  subnet_id      = aws_subnet.public[each.key].id
   route_table_id = aws_route_table.public.id
 }
 
-# --- NAT gateway(s) ----------------------------------------------------------
-
-resource "aws_eip" "nat" {
-  count  = var.single_nat_gateway ? 1 : local.az_count
-  domain = "vpc"
-
-  tags = merge(local.common_tags, { "Name" = "${var.name}-nat-eip-${count.index}" })
-}
-
-resource "aws_nat_gateway" "this" {
-  count         = var.single_nat_gateway ? 1 : local.az_count
-  allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = aws_subnet.public[count.index].id
-
-  tags = merge(local.common_tags, { "Name" = "${var.name}-nat-${count.index}" })
-
-  depends_on = [aws_internet_gateway.this]
-}
-
-# --- Private subnets ----------------------------------------------------------
-
-resource "aws_subnet" "private" {
-  count             = local.az_count
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = var.private_subnet_cidrs[count.index]
-  availability_zone = var.azs[count.index]
-
-  tags = merge(local.common_tags, {
-    "Name"                                     = "${var.name}-private-${var.azs[count.index]}"
-    "kubernetes.io/role/internal-elb"          = "1"
-  })
-}
-
+# ─── Private Route Tables (one per AZ → each AZ's own NAT GW) ────────────────
+# Separate table per AZ so each private subnet uses its local NAT GW.
+# Avoids cross-AZ NAT traffic charges and single point of failure.
 resource "aws_route_table" "private" {
-  count  = var.single_nat_gateway ? 1 : local.az_count
-  vpc_id = aws_vpc.this.id
+  for_each = var.priv_subnets
+  vpc_id   = aws_vpc.main.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = var.single_nat_gateway ? aws_nat_gateway.this[0].id : aws_nat_gateway.this[count.index].id
+    nat_gateway_id = aws_nat_gateway.main[each.key].id
   }
 
-  tags = merge(local.common_tags, { "Name" = "${var.name}-private-rt-${count.index}" })
+  tags = {
+    Name = "${var.project_name}-${var.environment}-private-rt-${each.key}"
+  }
 }
 
 resource "aws_route_table_association" "private" {
-  count          = local.az_count
-  subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = var.single_nat_gateway ? aws_route_table.private[0].id : aws_route_table.private[count.index].id
+  for_each = var.priv_subnets
+
+  subnet_id      = aws_subnet.private[each.key].id
+  route_table_id = aws_route_table.private[each.key].id
 }

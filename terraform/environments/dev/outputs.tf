@@ -10,10 +10,6 @@ output "cluster_endpoint" {
   value = module.eks.cluster_endpoint
 }
 
-output "cluster_arn" {
-  value = module.eks.cluster_arn
-}
-
 output "oidc_provider_arn" {
   description = "Pass this into future irsa module instances for Weeks 4-6 add-ons"
   value       = module.eks.oidc_provider_arn
