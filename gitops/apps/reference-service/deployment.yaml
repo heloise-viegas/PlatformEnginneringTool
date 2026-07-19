@@ -19,9 +19,10 @@ spec:
         runAsNonRoot: true
       containers:
         - name: reference-service
-          # TODO: swap for your ECR/registry image once Week 3's CI pipeline
-          # is building and pushing it. Never use `:latest` (Week 4 policy).
-          image: <your-registry>/reference-service:0.1.0
+          # Using :latest for now to get Week 1 working end-to-end. Swap to an
+          # immutable tag (e.g. a git SHA) once Week 3's CI pipeline exists -
+          # Week 4's policy engine will reject `:latest` outright.
+          image: 060795923562.dkr.ecr.ap-south-1.amazonaws.com/reference-ecr:latest
           ports:
             - containerPort: 8080
           env:
