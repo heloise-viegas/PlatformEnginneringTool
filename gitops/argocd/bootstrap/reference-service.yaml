@@ -11,9 +11,12 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/<your-org>/<your-repo>.git
+    repoURL: https://github.com/heloise-viegas/PlatformEnginneringTool.git
     targetRevision: main
-    path: gitops/apps/reference-service
+    path: charts/reference-service
+    helm:
+      valueFiles:
+        - values.yaml
 
   destination:
     server: https://kubernetes.default.svc
