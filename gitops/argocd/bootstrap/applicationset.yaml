@@ -1,0 +1,51 @@
+# Replaces per-service Application YAMLs (like the old reference-service.yaml)
+# with one generator that watches charts/* in this repo. Any new folder under
+# charts/ automatically becomes a deployed Argo CD Application - no manual
+# `kubectl apply` per service. This is what makes Backstage's future
+# "Create Service" template actually zero-touch end to end.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - git:
+        repoURL: https://github.com/heloise-viegas/PlatformEnginneringTool.git
+        revision: main
+        directories:
+          - path: charts/*
+
+  template:
+    metadata:
+      # {{.path.basename}} is the folder name under charts/, e.g. "reference-service"
+      name: "{{.path.basename}}"
+      namespace: argocd
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/heloise-viegas/PlatformEnginneringTool.git
+        targetRevision: main
+        path: "{{.path.path}}"
+        helm:
+          valueFiles:
+            - values.yaml
+
+      destination:
+        server: https://kubernetes.default.svc
+        # One namespace per service, matching its chart folder name.
+        namespace: "{{.path.basename}}"
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          # Learned the hard way: handles immutable field changes (like
+          # Deployment.spec.selector) by delete+recreate instead of failing.
+          - Replace=true

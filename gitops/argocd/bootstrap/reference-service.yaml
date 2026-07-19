@@ -1,33 +1,5 @@
-# TODO: replace repoURL with this repo's actual git remote once it's pushed.
-# Apply once with `kubectl apply -f` to bootstrap Argo CD, then Argo CD
-# manages itself via GitOps (any change to gitops/apps/reference-service
-# synced automatically).
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: reference-service
-  namespace: argocd
-spec:
-  project: default
-
-  source:
-    repoURL: https://github.com/heloise-viegas/PlatformEnginneringTool.git
-    targetRevision: main
-    path: charts/reference-service
-    helm:
-      valueFiles:
-        - values.yaml
-
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: reference-service
-
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      # Handles cases like Deployment.spec.selector changes (immutable field)
-      # by deleting and recreating the resource instead of failing the sync.
-      - Replace=true
+# Deprecated - replaced by applicationset.yaml, which auto-generates an
+# Application for every folder under charts/ (including this one). Delete the
+# live "reference-service" Application object in the cluster before applying
+# the ApplicationSet, otherwise the two will collide on the same name:
+#   kubectl delete application reference-service -n argocd
