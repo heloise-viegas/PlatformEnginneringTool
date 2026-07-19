@@ -9,8 +9,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 
 # Non-root on purpose - Week 4's Kyverno/Gatekeeper policy requires runAsNonRoot.
-RUN addgroup --system app && adduser --system --ingroup app app
-USER app
+# Numeric UID/GID (not a name) so kubelet can verify runAsNonRoot at admission
+# time without inspecting the image - a named USER fails that check outright.
+RUN addgroup --system --gid 10001 app && adduser --system --uid 10001 --ingroup app app
+USER 10001:10001
 
 EXPOSE 8080
 
