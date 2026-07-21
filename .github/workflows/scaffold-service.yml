@@ -5,6 +5,13 @@ name: Scaffold new service
 # Helm chart, and a thin CI workflow, then opens a PR. Nothing here bypasses
 # review - merging still requires an approval via branch protection on main.
 #
+# Runs as three separate stages (jobs) rather than one long job, so each
+# stage shows up on its own in the Actions UI and a failure is attributable
+# to a specific phase:
+#   validate  -> checks the input is usable before anything is generated
+#   generate  -> builds the new service/chart/CI-workflow files
+#   open-pr   -> takes those files and opens the PR for review
+#
 # ECR provisioning needs no registration step: terraform/environments/dev
 # derives its ECR repo list from `charts/*/Chart.yaml` directly (see
 # local.chart_service_names in main.tf), the same way Argo CD's
@@ -49,7 +56,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  scaffold:
+  # ─── Stage 1: validate ──────────────────────────────────────────────────
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -66,6 +74,14 @@ jobs:
             echo "::error::services/$name or charts/$name already exists. Pick a different name."
             exit 1
           fi
+
+  # ─── Stage 2: generate ──────────────────────────────────────────────────
+  generate:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -161,6 +177,31 @@ jobs:
                 AWS_ACCESS_KEY_ID: \${{ secrets.AWS_ACCESS_KEY_ID }}
                 AWS_SECRET_ACCESS_KEY: \${{ secrets.AWS_SECRET_ACCESS_KEY }}
           EOF
+
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaffolded-${{ inputs.service_name }}
+          path: |
+            services/${{ inputs.service_name }}
+            charts/${{ inputs.service_name }}
+            .github/workflows/${{ inputs.service_name }}-ci.yml
+          retention-days: 1
+          if-no-files-found: error
+
+  # ─── Stage 3: open-pr ───────────────────────────────────────────────────
+  open-pr:
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download generated files
+        uses: actions/download-artifact@v4
+        with:
+          name: scaffolded-${{ inputs.service_name }}
+          path: .
 
       - name: Open pull request
         uses: peter-evans/create-pull-request@v6
