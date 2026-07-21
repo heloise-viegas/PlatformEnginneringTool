@@ -195,6 +195,11 @@ jobs:
 
           jobs:
             build-and-deploy:
+              # A called reusable workflow can never have more permissions
+              # than the calling job grants it - service-ci-reusable.yml
+              # needs contents: write to push the bumped image tag back.
+              permissions:
+                contents: write
               uses: ./.github/workflows/service-ci-reusable.yml
               with:
                 service_name: ${name}
