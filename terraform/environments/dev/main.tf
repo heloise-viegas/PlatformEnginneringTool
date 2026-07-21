@@ -2,6 +2,18 @@ locals {
   # modules/vpc expects maps keyed by AZ, not parallel lists.
   pub_subnets  = zipmap(var.azs, var.public_subnet_cidrs)
   priv_subnets = zipmap(var.azs, var.private_subnet_cidrs)
+
+  # Every folder under charts/ with a Chart.yaml is a deployable service -
+  # this mirrors how Argo CD's ApplicationSet (gitops/argocd/bootstrap) also
+  # auto-discovers charts/* via its git generator. No separate list to
+  # maintain: the scaffold-service workflow already creates charts/<name>/,
+  # so the next `terraform apply` just picks it up.
+  # reference-service is excluded - its ECR repo ("reference-ecr") was
+  # created manually before this module existed.
+  chart_service_names = [
+    for f in fileset("${path.module}/../../../charts", "*/Chart.yaml") :
+    dirname(f) if dirname(f) != "reference-service"
+  ]
 }
 
 module "vpc" {
@@ -26,6 +38,14 @@ module "iam" {
   environment     = var.environment
   cluster_name    = var.cluster_name
   oidc_issuer_url = module.eks.oidc_issuer_url
+}
+
+module "ecr" {
+  source = "../../modules/ecr"
+
+  project_name  = var.project_name
+  environment   = var.environment
+  service_names = local.chart_service_names
 }
 
 module "eks" {
