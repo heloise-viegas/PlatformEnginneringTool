@@ -1,15 +1,18 @@
 name: Scaffold new service
 
-# Self-service golden-path workflow. A developer fills in the inputs below;
-# this generates a new service (from the reference-service template), its
-# Helm chart, and a thin CI workflow, then opens a PR. Nothing here bypasses
-# review - merging still requires an approval via branch protection on main.
+# Self-service golden-path workflow. It does NOT scaffold application code -
+# services/<name>/app + requirements.txt are expected to already exist,
+# pushed there by the developer beforehand. What this generates is only the
+# DevOps wrapper around that existing code: a platform-standard Dockerfile,
+# a Helm chart, and a thin CI workflow - then it opens a PR. Nothing here
+# bypasses review - merging still requires an approval via branch protection
+# on main.
 #
 # Runs as three separate stages (jobs) rather than one long job, so each
 # stage shows up on its own in the Actions UI and a failure is attributable
 # to a specific phase:
-#   validate  -> checks the input is usable before anything is generated
-#   generate  -> builds the new service/chart/CI-workflow files
+#   validate  -> checks the input and that the app code already exists
+#   generate  -> builds the Dockerfile/chart/CI-workflow files
 #   open-pr   -> takes those files and opens the PR for review
 #
 # ECR provisioning needs no registration step: terraform/environments/dev
@@ -70,8 +73,21 @@ jobs:
             echo "::error::'$name' isn't a valid name - lowercase alphanumeric and '-' only, must start with a letter, max 63 chars (DNS-1123 label rules, since this becomes a k8s namespace)."
             exit 1
           fi
-          if [ -d "services/$name" ] || [ -d "charts/$name" ]; then
-            echo "::error::services/$name or charts/$name already exists. Pick a different name."
+          if [ -d "charts/$name" ]; then
+            echo "::error::charts/$name already exists - this service has already been scaffolded."
+            exit 1
+          fi
+          # This workflow only generates the DevOps wrapper (Dockerfile,
+          # Helm chart, CI pipeline) around application code the developer
+          # already owns and has already pushed - it never scaffolds app
+          # code itself. So services/$name (with the reference-service
+          # layout: an app/ package + requirements.txt) must exist already.
+          if [ ! -d "services/$name" ]; then
+            echo "::error::services/$name doesn't exist yet. Push your application code there first (see services/reference-service for the expected layout - an app/ package with /healthz and /readyz endpoints, plus requirements.txt), then re-run this workflow to generate its Dockerfile, Helm chart, and CI pipeline."
+            exit 1
+          fi
+          if [ ! -d "services/$name/app" ] || [ ! -f "services/$name/requirements.txt" ]; then
+            echo "::error::services/$name is missing app/ or requirements.txt - the generated Dockerfile expects that layout (see services/reference-service)."
             exit 1
           fi
 
@@ -88,14 +104,26 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Scaffold service code from reference-service
+      - name: Scaffold Dockerfile for the service
+        env:
+          CONTAINER_PORT: ${{ inputs.container_port }}
         run: |
           name="${{ inputs.service_name }}"
-          cp -r services/reference-service "services/$name"
-          rm -rf "services/$name/app/__pycache__"
-          # catalog-info.yaml intentionally skipped for now - added back once
-          # Backstage (phase 2) is in place and can make use of it.
-          rm -f "services/$name/catalog-info.yaml"
+          # App code (services/$name/app, requirements.txt) is developer-
+          # owned and already exists (checked in the validate stage). This
+          # workflow only writes/overwrites the DevOps wrapper around it -
+          # the Dockerfile and .dockerignore stay platform-owned so security
+          # and build conventions (non-root, pinned base image) are
+          # consistent across every service, regardless of what's inside
+          # app/.
+          cp services/reference-service/Dockerfile "services/$name/Dockerfile"
+          cp services/reference-service/.dockerignore "services/$name/.dockerignore"
+
+          # Dockerfile hardcodes reference-service's port (8080) in both
+          # EXPOSE and the uvicorn --port arg. Keep it in sync with
+          # container_port, otherwise the app never actually listens on the
+          # port the Helm chart/probes expect.
+          sed -i "s/8080/${CONTAINER_PORT}/g" "services/$name/Dockerfile"
 
       - name: Scaffold Helm chart from reference-service chart
         env:
@@ -182,8 +210,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: scaffolded-${{ inputs.service_name }}
+          # Only the DevOps files this workflow actually generates/overwrites -
+          # not all of services/<name>, since the developer's existing app
+          # code under there shouldn't show up as a diff in the PR.
           path: |
-            services/${{ inputs.service_name }}
+            services/${{ inputs.service_name }}/Dockerfile
+            services/${{ inputs.service_name }}/.dockerignore
             charts/${{ inputs.service_name }}
             .github/workflows/${{ inputs.service_name }}-ci.yml
           retention-days: 1
@@ -219,8 +251,8 @@ jobs:
           body: |
             Auto-generated by the [scaffold-service workflow](../actions/workflows/scaffold-service.yml).
 
-            **Generated:**
-            - `services/${{ inputs.service_name }}` - copied from reference-service
+            **Generated** (your existing application code under `services/${{ inputs.service_name }}/app` is untouched - only the DevOps wrapper around it is added/updated):
+            - `services/${{ inputs.service_name }}/Dockerfile` and `.dockerignore` - platform-standard container build, based on reference-service's
             - `charts/${{ inputs.service_name }}` - Helm chart, parameterized from workflow inputs
             - `.github/workflows/${{ inputs.service_name }}-ci.yml` - CI pipeline (calls the shared `service-ci-reusable.yml`)
 
