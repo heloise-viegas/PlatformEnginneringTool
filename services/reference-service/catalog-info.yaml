@@ -1,0 +1,21 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: reference-service
+  description: FastAPI reference service - the golden path template every new service is built from
+  annotations:
+    github.com/project-slug: heloise-viegas/PlatformEnginneringTool
+  tags:
+    - python
+    - fastapi
+    - reference-service
+  links:
+    - url: https://github.com/heloise-viegas/PlatformEnginneringTool/tree/main/services/reference-service
+      title: Source
+    - url: https://github.com/heloise-viegas/PlatformEnginneringTool/tree/main/charts/reference-service
+      title: Helm chart
+spec:
+  type: service
+  lifecycle: experimental
+  owner: heloise
+  system: internal-developer-platform
