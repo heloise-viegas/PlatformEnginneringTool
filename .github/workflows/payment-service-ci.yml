@@ -10,6 +10,11 @@ on:
 
 jobs:
   build-and-deploy:
+    # A called reusable workflow can never have more permissions than the
+    # calling job grants it - service-ci-reusable.yml needs contents: write
+    # to push the bumped image tag back.
+    permissions:
+      contents: write
     uses: ./.github/workflows/service-ci-reusable.yml
     with:
       service_name: payment-service
@@ -17,5 +22,5 @@ jobs:
       ecr_repository: payment-service
       values_path: charts/payment-service/values.yaml
     secrets:
-      AWS_ACCESS_KEY_ID: \AKIAQ4J5YFRVLO5J43FB
-      AWS_SECRET_ACCESS_KEY: \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
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
