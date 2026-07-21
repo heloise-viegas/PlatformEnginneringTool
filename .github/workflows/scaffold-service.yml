@@ -1,0 +1,228 @@
+name: Scaffold new service
+
+# Self-service golden-path workflow. A developer fills in the inputs below;
+# this generates a new service (from the reference-service template), its
+# Helm chart, and a thin CI workflow, then opens a PR. Nothing here bypasses
+# review - merging still requires an approval via branch protection on main.
+#
+# Runs as three separate stages (jobs) rather than one long job, so each
+# stage shows up on its own in the Actions UI and a failure is attributable
+# to a specific phase:
+#   validate  -> checks the input is usable before anything is generated
+#   generate  -> builds the new service/chart/CI-workflow files
+#   open-pr   -> takes those files and opens the PR for review
+#
+# ECR provisioning needs no registration step: terraform/environments/dev
+# derives its ECR repo list from `charts/*/Chart.yaml` directly (see
+# local.chart_service_names in main.tf), the same way Argo CD's
+# ApplicationSet auto-discovers charts/* for deployment. Once this PR merges
+# and adds charts/<name>/, the next `terraform apply` picks it up.
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Service name (lowercase letters, numbers, hyphens - becomes services/<name>, charts/<name>, and the k8s namespace)"
+        required: true
+        type: string
+      container_port:
+        description: "Port the app listens on inside the container"
+        required: false
+        type: string
+        default: "8080"
+      replica_count:
+        description: "Number of pod replicas"
+        required: false
+        type: string
+        default: "1"
+      cpu_request:
+        required: false
+        type: string
+        default: "50m"
+      memory_request:
+        required: false
+        type: string
+        default: "64Mi"
+      cpu_limit:
+        required: false
+        type: string
+        default: "200m"
+      memory_limit:
+        required: false
+        type: string
+        default: "128Mi"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ─── Stage 1: validate ──────────────────────────────────────────────────
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate service name
+        run: |
+          name="${{ inputs.service_name }}"
+          if ! [[ "$name" =~ ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$ ]]; then
+            echo "::error::'$name' isn't a valid name - lowercase alphanumeric and '-' only, must start with a letter, max 63 chars (DNS-1123 label rules, since this becomes a k8s namespace)."
+            exit 1
+          fi
+          if [ -d "services/$name" ] || [ -d "charts/$name" ]; then
+            echo "::error::services/$name or charts/$name already exists. Pick a different name."
+            exit 1
+          fi
+
+  # ─── Stage 2: generate ──────────────────────────────────────────────────
+  generate:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Scaffold service code from reference-service
+        run: |
+          name="${{ inputs.service_name }}"
+          cp -r services/reference-service "services/$name"
+          rm -rf "services/$name/app/__pycache__"
+          # catalog-info.yaml intentionally skipped for now - added back once
+          # Backstage (phase 2) is in place and can make use of it.
+          rm -f "services/$name/catalog-info.yaml"
+
+      - name: Scaffold Helm chart from reference-service chart
+        env:
+          SERVICE_NAME: ${{ inputs.service_name }}
+          REPLICA_COUNT: ${{ inputs.replica_count }}
+          CONTAINER_PORT: ${{ inputs.container_port }}
+          CPU_REQUEST: ${{ inputs.cpu_request }}
+          MEM_REQUEST: ${{ inputs.memory_request }}
+          CPU_LIMIT: ${{ inputs.cpu_limit }}
+          MEM_LIMIT: ${{ inputs.memory_limit }}
+          AWS_REGION: ap-south-1
+        run: |
+          pip install --quiet ruamel.yaml
+          cp -r charts/reference-service "charts/$SERVICE_NAME"
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from ruamel.yaml import YAML
+
+          yaml = YAML()
+          yaml.preserve_quotes = True
+          yaml.indent(mapping=2, sequence=2, offset=0)
+
+          name = os.environ["SERVICE_NAME"]
+          chart_dir = Path("charts") / name
+
+          chart_yaml_path = chart_dir / "Chart.yaml"
+          chart = yaml.load(chart_yaml_path.read_text())
+          chart["name"] = name
+          chart["description"] = f"A Helm chart for {name}, scaffolded from reference-service"
+          chart["appVersion"] = "0.1.0"
+          with chart_yaml_path.open("w") as f:
+              yaml.dump(chart, f)
+
+          values_path = chart_dir / "values.yaml"
+          values = yaml.load(values_path.read_text())
+          values["replicaCount"] = int(os.environ["REPLICA_COUNT"])
+          values["containerPort"] = int(os.environ["CONTAINER_PORT"])
+          values["image"]["repository"] = f'<AWS_ACCOUNT_ID>.dkr.ecr.{os.environ["AWS_REGION"]}.amazonaws.com/{name}'
+          # No image has been built yet - the service's own CI run (triggered
+          # by this same PR's merge, since it touches services/<name>/**)
+          # bumps this to a real tag right after. Expect a brief
+          # ImagePullBackOff between merge and that first build completing.
+          values["image"]["tag"] = "pending-first-build"
+          values["resources"]["requests"]["cpu"] = os.environ["CPU_REQUEST"]
+          values["resources"]["requests"]["memory"] = os.environ["MEM_REQUEST"]
+          values["resources"]["limits"]["cpu"] = os.environ["CPU_LIMIT"]
+          values["resources"]["limits"]["memory"] = os.environ["MEM_LIMIT"]
+          values["env"]["serviceName"] = name
+          values["env"]["serviceVersion"] = "0.1.0"
+          with values_path.open("w") as f:
+              yaml.dump(values, f)
+          PY
+
+      - name: Generate CI workflow for the new service
+        run: |
+          name="${{ inputs.service_name }}"
+          cat > ".github/workflows/${name}-ci.yml" <<EOF
+          name: ${name} CI/CD
+
+          on:
+            push:
+              branches: [main]
+              paths:
+                - "services/${name}/**"
+                - ".github/workflows/${name}-ci.yml"
+            workflow_dispatch: {}
+
+          jobs:
+            build-and-deploy:
+              uses: ./.github/workflows/service-ci-reusable.yml
+              with:
+                service_name: ${name}
+                service_path: services/${name}
+                ecr_repository: ${name}
+                values_path: charts/${name}/values.yaml
+              secrets:
+                AWS_ACCESS_KEY_ID: \${{ secrets.AWS_ACCESS_KEY_ID }}
+                AWS_SECRET_ACCESS_KEY: \${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          EOF
+
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaffolded-${{ inputs.service_name }}
+          path: |
+            services/${{ inputs.service_name }}
+            charts/${{ inputs.service_name }}
+            .github/workflows/${{ inputs.service_name }}-ci.yml
+          retention-days: 1
+          if-no-files-found: error
+
+  # ─── Stage 3: open-pr ───────────────────────────────────────────────────
+  open-pr:
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download generated files
+        uses: actions/download-artifact@v4
+        with:
+          name: scaffolded-${{ inputs.service_name }}
+          path: .
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "feat: scaffold ${{ inputs.service_name }} service"
+          branch: "scaffold/${{ inputs.service_name }}"
+          title: "Scaffold new service: ${{ inputs.service_name }}"
+          labels: scaffolded-service
+          body: |
+            Auto-generated by the [scaffold-service workflow](../actions/workflows/scaffold-service.yml).
+
+            **Generated:**
+            - `services/${{ inputs.service_name }}` - copied from reference-service
+            - `charts/${{ inputs.service_name }}` - Helm chart, parameterized from workflow inputs
+            - `.github/workflows/${{ inputs.service_name }}-ci.yml` - CI pipeline (calls the shared `service-ci-reusable.yml`)
+
+            **Inputs used:** port `${{ inputs.container_port }}`, replicas `${{ inputs.replica_count }}`, requests `${{ inputs.cpu_request }}`/`${{ inputs.memory_request }}`, limits `${{ inputs.cpu_limit }}`/`${{ inputs.memory_limit }}`.
+
+            **Before merging:** review the generated files, especially the Helm values and CI workflow.
+
+            **After merging:**
+            1. Run `terraform apply` in `terraform/environments/dev` - it auto-detects the new `charts/${{ inputs.service_name }}/Chart.yaml` and creates the matching ECR repository (image pushes fail until this runs).
+            2. The service's own CI workflow fires automatically on this merge (it touches `services/${{ inputs.service_name }}/**`), builds the image, and bumps the chart's `values.yaml` tag from the `pending-first-build` placeholder.
+            3. Argo CD's `ApplicationSet` picks up the new `charts/${{ inputs.service_name }}` folder and deploys it - no manual step needed there.

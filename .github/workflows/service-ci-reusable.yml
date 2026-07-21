@@ -1,0 +1,94 @@
+name: service CI/CD (reusable)
+
+# Shared build-and-deploy pipeline for every service under services/*.
+# Per-service workflows (e.g. reference-service-ci.yml, and whatever
+# <service>-ci.yml the scaffold-service workflow generates) are thin callers
+# of this one, so scaffolding a new service doesn't mean copy-pasting the
+# whole pipeline every time.
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        description: "Service name - used for commit messages and image tags"
+        required: true
+        type: string
+      service_path:
+        description: "Path to the service's Docker build context, e.g. services/reference-service"
+        required: true
+        type: string
+      ecr_repository:
+        description: "ECR repository name for this service"
+        required: true
+        type: string
+      values_path:
+        description: "Path to the Helm chart's values.yaml to bump with the new image tag"
+        required: true
+        type: string
+      aws_region:
+        required: false
+        type: string
+        default: ap-south-1
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag (short git SHA - never :latest)
+        id: vars
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.service_path }}
+          # Must match the EKS node architecture (x86_64 t3.medium nodes) -
+          # building on an Apple Silicon laptop without this flag produces an
+          # arm64 image that fails to pull with "no match for platform".
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ inputs.ecr_repository }}:${{ steps.vars.outputs.tag }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ inputs.ecr_repository }}:latest
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Bump image tag in Helm values
+        run: |
+          yq -i '.image.tag = "${{ steps.vars.outputs.tag }}"' "${{ inputs.values_path }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ inputs.values_path }}"
+          if git diff --cached --quiet; then
+            echo "No values change to commit."
+          else
+            git commit -m "ci: deploy ${{ inputs.service_name }} ${{ steps.vars.outputs.tag }}"
+            git push
+          fi
