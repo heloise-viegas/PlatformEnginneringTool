@@ -89,6 +89,8 @@ jobs:
           python-version: "3.12"
 
       - name: Scaffold service code from reference-service
+        env:
+          CONTAINER_PORT: ${{ inputs.container_port }}
         run: |
           name="${{ inputs.service_name }}"
           cp -r services/reference-service "services/$name"
@@ -96,6 +98,12 @@ jobs:
           # catalog-info.yaml intentionally skipped for now - added back once
           # Backstage (phase 2) is in place and can make use of it.
           rm -f "services/$name/catalog-info.yaml"
+
+          # Dockerfile hardcodes reference-service's port (8080) in both
+          # EXPOSE and the uvicorn --port arg. Keep it in sync with
+          # container_port, otherwise the app never actually listens on the
+          # port the Helm chart/probes expect.
+          sed -i "s/8080/${CONTAINER_PORT}/g" "services/$name/Dockerfile"
 
       - name: Scaffold Helm chart from reference-service chart
         env:
