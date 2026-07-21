@@ -17,6 +17,13 @@ on:
 
 jobs:
   build-and-deploy:
+    # A called reusable workflow can never have more permissions than the
+    # calling job grants it, regardless of what the reusable workflow itself
+    # declares - so this needs to explicitly grant what
+    # service-ci-reusable.yml asks for (contents: write, to push the bumped
+    # image tag back to the values.yaml).
+    permissions:
+      contents: write
     uses: ./.github/workflows/service-ci-reusable.yml
     with:
       service_name: reference-service
