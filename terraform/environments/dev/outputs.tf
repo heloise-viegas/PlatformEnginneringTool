@@ -15,6 +15,11 @@ output "oidc_provider_arn" {
   value       = module.eks.oidc_provider_arn
 }
 
+output "ecr_repository_urls" {
+  description = "Map of service name to its ECR repository URL, for services registered in var.service_names"
+  value       = module.ecr.repository_urls
+}
+
 output "configure_kubectl" {
   description = "Command to update your local kubeconfig once the cluster exists"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
