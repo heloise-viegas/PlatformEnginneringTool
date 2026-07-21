@@ -1,0 +1,21 @@
+name: payment CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/payment/**"
+      - ".github/workflows/payment-ci.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-and-deploy:
+    uses: ./.github/workflows/service-ci-reusable.yml
+    with:
+      service_name: payment
+      service_path: services/payment
+      ecr_repository: payment
+      values_path: charts/payment/values.yaml
+    secrets:
+      AWS_ACCESS_KEY_ID: \AKIAQ4J5YFRVLO5J43FB
+      AWS_SECRET_ACCESS_KEY: \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
