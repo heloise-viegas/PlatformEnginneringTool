@@ -206,6 +206,12 @@ jobs:
       - name: Open pull request
         uses: peter-evans/create-pull-request@v6
         with:
+          # The default GITHUB_TOKEN is hard-blocked from creating/updating
+          # anything under .github/workflows/** (GitHub's own anti-loop
+          # guardrail, not something `permissions:` can override). Since this
+          # PR includes a generated <service>-ci.yml, it needs a PAT with the
+          # `workflow` scope instead - add one as the SCAFFOLD_PAT secret.
+          token: ${{ secrets.SCAFFOLD_PAT }}
           commit-message: "feat: scaffold ${{ inputs.service_name }} service"
           branch: "scaffold/${{ inputs.service_name }}"
           title: "Scaffold new service: ${{ inputs.service_name }}"
