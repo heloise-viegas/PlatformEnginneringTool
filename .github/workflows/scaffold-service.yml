@@ -182,15 +182,32 @@ jobs:
       - name: Generate CI workflow for the new service
         run: |
           name="${{ inputs.service_name }}"
-          cat > ".github/workflows/${name}-ci.yml" <<EOF
-          name: ${name} CI/CD
+
+          # IMPORTANT: do not write GitHub Actions expression syntax (dollar
+          # sign, double open brace, ... , double close brace) directly
+          # anywhere in this run block, including in comments - GitHub scans
+          # the ENTIRE run block text for that pattern before bash ever sees
+          # it, with no regard for bash comments, quotes, or heredocs, and
+          # evaluates every one it finds. Writing the real secrets reference
+          # directly here would bake the actual secret VALUE into the
+          # generated file instead of leaving an expression for the
+          # generated workflow to evaluate later - which is exactly what
+          # happened the first time this was written this way (a real AWS
+          # key ended up committed in plaintext on main). The heredoc below
+          # is quoted (<<'EOF') so bash does zero expansion inside it -
+          # __SERVICE_NAME__ is substituted via sed afterward - and the two
+          # secrets lines use a string-literal expression as GitHub's own
+          # escape hatch for that syntax, so it survives GitHub's pass as
+          # plain text instead of being resolved to a value.
+          cat > ".github/workflows/${name}-ci.yml" <<'EOF'
+          name: __SERVICE_NAME__ CI/CD
 
           on:
             push:
               branches: [main]
               paths:
-                - "services/${name}/**"
-                - ".github/workflows/${name}-ci.yml"
+                - "services/__SERVICE_NAME__/**"
+                - ".github/workflows/__SERVICE_NAME__-ci.yml"
             workflow_dispatch: {}
 
           jobs:
@@ -202,14 +219,15 @@ jobs:
                 contents: write
               uses: ./.github/workflows/service-ci-reusable.yml
               with:
-                service_name: ${name}
-                service_path: services/${name}
-                ecr_repository: ${name}
-                values_path: charts/${name}/values.yaml
+                service_name: __SERVICE_NAME__
+                service_path: services/__SERVICE_NAME__
+                ecr_repository: __SERVICE_NAME__
+                values_path: charts/__SERVICE_NAME__/values.yaml
               secrets:
-                AWS_ACCESS_KEY_ID: \${{ secrets.AWS_ACCESS_KEY_ID }}
-                AWS_SECRET_ACCESS_KEY: \${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                AWS_ACCESS_KEY_ID: ${{ '${{' }} secrets.AWS_ACCESS_KEY_ID }}
+                AWS_SECRET_ACCESS_KEY: ${{ '${{' }} secrets.AWS_SECRET_ACCESS_KEY }}
           EOF
+          sed -i "s/__SERVICE_NAME__/${name}/g" ".github/workflows/${name}-ci.yml"
 
       - name: Upload generated files
         uses: actions/upload-artifact@v4
