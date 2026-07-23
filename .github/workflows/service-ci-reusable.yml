@@ -55,6 +55,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.aws_region }}
 
+      - name: Wait for ECR repository to exist
+        # This workflow (triggered by services/<name>/** changing) and
+        # terraform-dev.yml (triggered by charts/*/Chart.yaml changing) both
+        # fire off the same merge for a newly scaffolded service, but ECR
+        # repo creation there sits behind manual approval in the
+        # terraform-dev-apply environment - so it can still be pending when
+        # this job reaches the push step. Poll the actual AWS resource
+        # rather than the other workflow's run status, so this works
+        # regardless of how/when the repo was created (terraform, manually,
+        # whatever) and is a no-op for every repeat deploy once it exists.
+        run: |
+          for i in $(seq 1 20); do
+            if aws ecr describe-repositories \
+                --repository-names "${{ inputs.ecr_repository }}" \
+                --region "${{ inputs.aws_region }}" >/dev/null 2>&1; then
+              echo "ECR repository ${{ inputs.ecr_repository }} exists."
+              exit 0
+            fi
+            echo "ECR repository ${{ inputs.ecr_repository }} not found yet (attempt $i/20) - waiting 15s."
+            sleep 15
+          done
+          echo "::error::ECR repository ${{ inputs.ecr_repository }} still doesn't exist after 5 minutes. If this is a new service, approve the pending apply job in the terraform-dev-apply environment (terraform-dev.yml), then re-run this workflow."
+          exit 1
+
       - name: Log in to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
