@@ -1,0 +1,26 @@
+name: user-service CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/user-service/**"
+      - ".github/workflows/user-service-ci.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-and-deploy:
+    # A called reusable workflow can never have more permissions
+    # than the calling job grants it - service-ci-reusable.yml
+    # needs contents: write to push the bumped image tag back.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/service-ci-reusable.yml
+    with:
+      service_name: user-service
+      service_path: services/user-service
+      ecr_repository: user-service
+      values_path: charts/user-service/values.yaml
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
