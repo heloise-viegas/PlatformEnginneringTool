@@ -19,7 +19,8 @@ name: Scaffold new service
 # derives its ECR repo list from `charts/*/Chart.yaml` directly (see
 # local.chart_service_names in main.tf), the same way Argo CD's
 # ApplicationSet auto-discovers charts/* for deployment. Once this PR merges
-# and adds charts/<name>/, the next `terraform apply` picks it up.
+# and adds charts/<name>/, the terraform-dev workflow picks it up
+# automatically (behind its own approval gate) - see terraform-dev.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -125,6 +126,21 @@ jobs:
           # port the Helm chart/probes expect.
           sed -i "s/8080/${CONTAINER_PORT}/g" "services/$name/Dockerfile"
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Get AWS account ID
+        id: aws
+        # Resolves the real account ID instead of leaving a placeholder in
+        # values.yaml for someone to fix by hand after the fact (that
+        # placeholder used to be a literal "<AWS_ACCOUNT_ID>" string - see
+        # the payment-service scaffold PR history for how that went).
+        run: echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+
       - name: Scaffold Helm chart from reference-service chart
         env:
           SERVICE_NAME: ${{ inputs.service_name }}
@@ -135,6 +151,7 @@ jobs:
           CPU_LIMIT: ${{ inputs.cpu_limit }}
           MEM_LIMIT: ${{ inputs.memory_limit }}
           AWS_REGION: ap-south-1
+          AWS_ACCOUNT_ID: ${{ steps.aws.outputs.account_id }}
         run: |
           pip install --quiet ruamel.yaml
           cp -r charts/reference-service "charts/$SERVICE_NAME"
@@ -163,7 +180,7 @@ jobs:
           values = yaml.load(values_path.read_text())
           values["replicaCount"] = int(os.environ["REPLICA_COUNT"])
           values["containerPort"] = int(os.environ["CONTAINER_PORT"])
-          values["image"]["repository"] = f'<AWS_ACCOUNT_ID>.dkr.ecr.{os.environ["AWS_REGION"]}.amazonaws.com/{name}'
+          values["image"]["repository"] = f'{os.environ["AWS_ACCOUNT_ID"]}.dkr.ecr.{os.environ["AWS_REGION"]}.amazonaws.com/{name}'
           # No image has been built yet - the service's own CI run (triggered
           # by this same PR's merge, since it touches services/<name>/**)
           # bumps this to a real tag right after. Expect a brief
@@ -284,6 +301,6 @@ jobs:
             **Before merging:** review the generated files, especially the Helm values and CI workflow.
 
             **After merging:**
-            1. Run `terraform apply` in `terraform/environments/dev` - it auto-detects the new `charts/${{ inputs.service_name }}/Chart.yaml` and creates the matching ECR repository (image pushes fail until this runs).
+            1. This merge adds `charts/${{ inputs.service_name }}/Chart.yaml`, which triggers the `terraform-dev` workflow - it plans automatically, then waits for approval in the `terraform-dev-apply` environment before creating the matching ECR repository (image pushes fail until that approval happens).
             2. The service's own CI workflow fires automatically on this merge (it touches `services/${{ inputs.service_name }}/**`), builds the image, and bumps the chart's `values.yaml` tag from the `pending-first-build` placeholder.
             3. Argo CD's `ApplicationSet` picks up the new `charts/${{ inputs.service_name }}` folder and deploys it - no manual step needed there.

@@ -1,0 +1,146 @@
+name: terraform (dev)
+
+# Closes the gap where a merged scaffold-service PR (which adds
+# charts/<name>/Chart.yaml) required someone to remember to run
+# `terraform apply` by hand before the new service's ECR repo existed -
+# every scaffolded service's first CI build failed at the ECR push step
+# until that manual step happened.
+#
+# Two separate flows:
+#  - plan-preview: runs on every PR touching terraform/** or a
+#    charts/*/Chart.yaml, purely so reviewers can see the infra diff before
+#    merge. No state changes, no approval gate.
+#  - plan -> apply: runs on push to main (or manual dispatch). `plan` saves
+#    the plan file as an artifact; `apply` downloads and applies that exact
+#    plan after the `terraform-dev-apply` environment approval, so the
+#    reviewer approving is looking at the same plan output in the same run
+#    - not re-planning (and possibly getting a different result) at apply
+#    time.
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "charts/*/Chart.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "charts/*/Chart.yaml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# terraform/environments/dev uses a single S3 backend + DynamoDB lock table,
+# so state locking already stops concurrent applies from corrupting state -
+# this just stops two runs queueing up and fighting over the lock at all.
+concurrency:
+  group: terraform-dev
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: terraform/environments/dev
+
+jobs:
+  plan-preview:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.6"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Format check
+        run: terraform fmt -check -recursive ../../
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan (preview only)
+        run: terraform plan -input=false -no-color
+
+  plan:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.6"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Plan
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/environments/dev/tfplan
+          retention-days: 1
+
+  apply:
+    needs: plan
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Approval happens here - the plan job above (same run) shows exactly
+    # what will change, right above this job in the Actions UI. Requires a
+    # "terraform-dev-apply" environment under Settings -> Environments with
+    # required reviewers configured - without that this runs unattended
+    # immediately after plan finishes.
+    environment: terraform-dev-apply
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.6"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/environments/dev
+
+      - name: Apply
+        run: terraform apply -input=false tfplan
