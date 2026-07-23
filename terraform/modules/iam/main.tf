@@ -1,7 +1,7 @@
 # Derive the OIDC provider ARN and bare hostname from the issuer URL.
 # The issuer URL looks like: https://oidc.eks.ap-south-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E
 locals {
-  oidc_issuer_host = replace(var.oidc_issuer_url, "https://", "")
+  oidc_issuer_host  = replace(var.oidc_issuer_url, "https://", "")
   oidc_provider_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.oidc_issuer_host}"
 }
 

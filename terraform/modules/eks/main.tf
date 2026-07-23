@@ -160,9 +160,9 @@ resource "aws_eks_node_group" "workers" {
 
 # VPC CNI — pod networking (must come before nodes are useful)
 resource "aws_eks_addon" "vpc_cni" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "vpc-cni"
-  addon_version            = "v1.18.1-eksbuild.1"
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "vpc-cni"
+  addon_version               = "v1.18.1-eksbuild.1"
   resolve_conflicts_on_update = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.workers]
@@ -170,9 +170,9 @@ resource "aws_eks_addon" "vpc_cni" {
 
 # CoreDNS — cluster DNS
 resource "aws_eks_addon" "coredns" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "coredns"
-  addon_version            = "v1.11.1-eksbuild.9"
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "coredns"
+  addon_version               = "v1.11.1-eksbuild.9"
   resolve_conflicts_on_update = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.workers]
@@ -180,9 +180,9 @@ resource "aws_eks_addon" "coredns" {
 
 # kube-proxy — iptables rules for Services
 resource "aws_eks_addon" "kube_proxy" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "kube-proxy"
-  addon_version            = "v1.30.0-eksbuild.3"
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "kube-proxy"
+  addon_version               = "v1.30.0-eksbuild.3"
   resolve_conflicts_on_update = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.workers]
@@ -192,10 +192,10 @@ resource "aws_eks_addon" "kube_proxy" {
 # service_account_role_arn wires the IRSA role to the addon's service account
 # so the controller uses scoped IAM credentials instead of the node role
 resource "aws_eks_addon" "ebs_csi" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "aws-ebs-csi-driver"
-  addon_version            = "v1.31.0-eksbuild.1"
-  service_account_role_arn = var.ebs_csi_role_arn
+  cluster_name                = aws_eks_cluster.main.name
+  addon_name                  = "aws-ebs-csi-driver"
+  addon_version               = "v1.31.0-eksbuild.1"
+  service_account_role_arn    = var.ebs_csi_role_arn
   resolve_conflicts_on_update = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.workers]
