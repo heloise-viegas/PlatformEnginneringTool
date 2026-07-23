@@ -6,7 +6,7 @@ image:
   # This sets the pull policy for images.
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "pending-first-build"
+  tag: "59708d5"
 containerPort: 8080
 resources:
   requests:
