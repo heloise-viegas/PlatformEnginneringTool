@@ -4,8 +4,6 @@ A self-service internal developer platform (IDP) on AWS EKS. A developer pushes 
 
 ## Architecture
 
-![Platform flow](./platform-flow.png)
-
 **Flow:** a developer's app code lands in `services/<name>/`. The scaffold workflow generates the DevOps wrapper around it and opens a PR. Once merged, the reusable CI pipeline builds the image and pushes it to ECR while Terraform provisions the matching ECR repository. Helm charts (auto-discovered) get picked up by an Argo CD `ApplicationSet`, which deploys the service to the cluster with zero manual `kubectl apply` steps.
 
 ## Stack
