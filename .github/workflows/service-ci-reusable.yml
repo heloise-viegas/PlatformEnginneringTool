@@ -97,7 +97,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/${{ inputs.ecr_repository }}:${{ steps.vars.outputs.tag }}
-            ${{ steps.ecr-login.outputs.registry }}/${{ inputs.ecr_repository }}:latest
 
       - name: Install yq
         run: |
