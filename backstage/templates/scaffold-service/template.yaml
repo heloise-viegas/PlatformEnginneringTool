@@ -1,0 +1,78 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: scaffold-service
+  title: Scaffold a new service (Dockerfile + Helm chart + CI)
+  description: >
+    Runs the platform's scaffold-service GitHub Actions workflow to generate
+    a platform-standard Dockerfile, Helm chart, and CI pipeline for a service
+    whose application code already exists under services/<name>, then opens
+    a PR with the generated files.
+  tags:
+    - github-actions
+    - kubernetes
+    - helm
+spec:
+  owner: heloise
+  type: service
+  parameters:
+    - title: Service
+      required:
+        - serviceName
+      properties:
+        serviceName:
+          title: Service name
+          type: string
+          description: >
+            Must match an existing services/<name> directory (lowercase,
+            numbers, hyphens - becomes the k8s namespace too).
+    - title: Container
+      properties:
+        containerPort:
+          title: Container port
+          type: string
+          default: "8080"
+        replicaCount:
+          title: Replica count
+          type: string
+          default: "1"
+    - title: Resources
+      properties:
+        cpuRequest:
+          title: CPU request
+          type: string
+          default: "50m"
+        memoryRequest:
+          title: Memory request
+          type: string
+          default: "64Mi"
+        cpuLimit:
+          title: CPU limit
+          type: string
+          default: "200m"
+        memoryLimit:
+          title: Memory limit
+          type: string
+          default: "128Mi"
+  steps:
+    - id: trigger
+      name: Dispatch scaffold-service workflow
+      action: github:actions:dispatch
+      input:
+        repoUrl: github.com?owner=heloise-viegas&repo=PlatformEnginneringTool
+        workflowId: scaffold-service.yml
+        branchOrTagName: main
+        workflowInputs:
+          service_name: ${{ parameters.serviceName }}
+          container_port: ${{ parameters.containerPort }}
+          replica_count: ${{ parameters.replicaCount }}
+          cpu_request: ${{ parameters.cpuRequest }}
+          memory_request: ${{ parameters.memoryRequest }}
+          cpu_limit: ${{ parameters.cpuLimit }}
+          memory_limit: ${{ parameters.memoryLimit }}
+  output:
+    links:
+      - title: View workflow runs
+        url: https://github.com/heloise-viegas/PlatformEnginneringTool/actions/workflows/scaffold-service.yml
+      - title: View open PRs
+        url: https://github.com/heloise-viegas/PlatformEnginneringTool/pulls
